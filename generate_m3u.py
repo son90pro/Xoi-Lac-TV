@@ -1,10 +1,9 @@
 import datetime
 import json
-import re
-import time
-from playwright.sync_api import sync_playwright
+import urllib.parse
+import requests
 
-USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+USER_AGENT = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Mobile/15E148 Safari/604.1"
 REFERER = "https://xlz.domainkqt.cc/"
 
 SPORT_ICONS = {
@@ -18,117 +17,159 @@ SPORT_ICONS = {
     "game": "🎮",
 }
 
+# Danh sách các API Endpoint dự phòng của Xôi Lạc / Về Bờ / Cà Khía / Thập Cẩm
+API_ENDPOINTS = [
+    "https://api.vebo.xyz/api/match/featured",
+    "https://api.vebotv.org/api/match/featured",
+    "https://api.vungtau.xyz/api/match/featured",
+    "https://api.cakhia.org/api/match/featured",
+    "https://api.thapcam.net/api/match/featured",
+    "https://api.vebo.xyz/api/match/live",
+    "https://data-api.apisportdata.com/v1/matches/live",
+]
 
-def fetch_matches_with_playwright():
-    captured_matches = []
+# Danh sách Proxy giúp lách dải IP GitHub Actions bị Cloudflare chặn
+PROXIES = [
+    "",  # Thử trực tiếp
+    "https://corsproxy.io/?",
+    "https://api.allorigins.win/raw?url=",
+]
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-blink-features=AutomationControlled",
-            ],
-        )
-        context = browser.new_context(
-            user_agent=USER_AGENT,
-            viewport={"width": 412, "height": 915},
-            is_mobile=True,
-            has_touch=True,
-        )
-        page = context.new_page()
 
-        # Bắt API response ngầm khi trình duyệt nạp trang
-        def handle_response(response):
-            nonlocal captured_matches
-            url = response.url
-            if ("api/match" in url or "matches/live" in url) and response.status == 200:
-                try:
-                    data = response.json()
-                    matches = (
-                        data.get("data", [])
-                        if isinstance(data, dict)
-                        else data
-                    )
-                    if isinstance(matches, dict):
-                        matches = matches.get("item", []) or matches.get(
-                            "matches", []
-                        )
+def fetch_data_from_api(url, proxy_prefix=""):
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Referer": REFERER,
+        "Origin": REFERER.rstrip("/"),
+        "Accept": "application/json, text/plain, */*",
+    }
 
-                    if isinstance(matches, list) and len(matches) > 0:
-                        captured_matches = matches
-                        print(
-                            f"✅ Bắt thành công {len(matches)} trận đấu từ API:"
-                            f" {url}"
-                        )
-                except Exception:
-                    pass
+    target_url = (
+        f"{proxy_prefix}{urllib.parse.quote(url)}" if proxy_prefix else url
+    )
 
-        page.on("response", handle_response)
-
-        # Danh sách domain Xôi Lạc / Về Bờ để truy cập thử
-        target_domains = [
-            "https://vebo.xyz",
-            "https://xlz.domainkqt.cc",
-            "https://bit.ly/xoilac",
-        ]
-
-        for domain in target_domains:
+    try:
+        response = requests.get(target_url, headers=headers, timeout=10)
+        if response.status_code == 200:
             try:
-                print(f"🌐 Trình duyệt đang truy cập: {domain}")
-                page.goto(domain, wait_until="domcontentloaded", timeout=20000)
-                page.wait_for_timeout(4000)
+                data = response.json()
+                if isinstance(data, dict) and "contents" in data:
+                    data = json.loads(data["contents"])
+                return data
+            except Exception:
+                return json.loads(response.text)
+    except Exception as e:
+        print(f"⚠️ Kết nối thất bại [{proxy_prefix or 'Direct'}]: {e}")
+    return None
 
-                if captured_matches:
+
+def extract_matches(data):
+    if not data:
+        return []
+
+    matches = []
+    if isinstance(data, dict):
+        matches = (
+            data.get("data", [])
+            or data.get("item", [])
+            or data.get("matches", [])
+        )
+        if isinstance(matches, dict):
+            matches = matches.get("item", []) or matches.get("matches", [])
+    elif isinstance(data, list):
+        matches = data
+
+    return matches if isinstance(matches, list) else []
+
+
+def get_stream_urls(match):
+    match_id = match.get("id") or match.get("fid") or match.get("_id")
+    servers = (
+        match.get("play_urls")
+        or match.get("servers")
+        or match.get("stream_links")
+        or []
+    )
+
+    if not servers and match_id:
+        for base_api in [
+            "https://api.vebo.xyz/api/match",
+            "https://api.vebotv.org/api/match",
+        ]:
+            detail_url = f"{base_api}/{match_id}/stream"
+            detail_data = fetch_data_from_api(detail_url)
+            if detail_data and isinstance(detail_data, dict):
+                servers = (
+                    detail_data.get("data", {}).get("play_urls")
+                    or detail_data.get("data", {}).get("servers")
+                    or []
+                )
+                if servers:
                     break
-            except Exception as e:
-                print(f"⚠️ Không thể tải {domain}: {e}")
 
-        # Trường hợp không bắt được qua Network, gọi trực tiếp API trong ngữ cảnh trình duyệt
-        if not captured_matches:
-            print("🔄 Đang thử fetch trực tiếp API qua Browser context...")
-            api_endpoints = [
-                "https://api.vebo.xyz/api/match/featured",
-                "https://api.vebotv.org/api/match/featured",
-            ]
-            for api in api_endpoints:
-                try:
-                    res_text = page.evaluate(
-                        f"""async () => {{
-                        let res = await fetch('{api}');
-                        return await res.text();
-                    }}"""
-                    )
-                    data = json.loads(res_text)
-                    matches = (
-                        data.get("data", [])
-                        if isinstance(data, dict)
-                        else data
-                    )
-                    if isinstance(matches, dict):
-                        matches = matches.get("item", []) or matches.get(
-                            "matches", []
-                        )
-                    if isinstance(matches, list) and len(matches) > 0:
-                        captured_matches = matches
-                        print(
-                            f"✅ Fetch trực tiếp thành công {len(matches)} trận"
-                            f" từ {api}"
-                        )
-                        break
-                except Exception as e:
-                    print(f"⚠️ Lỗi fetch API {api}: {e}")
+    links = []
+    for s in servers:
+        if isinstance(s, dict):
+            url = (
+                s.get("url")
+                or s.get("play_url")
+                or s.get("stream_url")
+                or s.get("link")
+                or s.get("m3u8")
+            )
+            blv = (
+                s.get("name")
+                or s.get("commentator")
+                or s.get("blv")
+                or "LIVE"
+            )
+        elif isinstance(s, str):
+            url = s
+            blv = "LIVE"
+        else:
+            continue
 
-        browser.close()
+        if url and ("m3u8" in url or "http" in url):
+            links.append((blv, url))
 
-    return captured_matches
+    if not links:
+        single_url = (
+            match.get("play_url")
+            or match.get("stream_url")
+            or match.get("m3u8")
+        )
+        if single_url:
+            links.append(("LIVE", single_url))
+
+    return links
 
 
-def build_m3u(matches):
+def main():
+    print("🚀 Bắt đầu quét danh sách trận đấu Xôi Lạc Z TV...")
+    all_matches = []
+
+    for api in API_ENDPOINTS:
+        for proxy in PROXIES:
+            print(
+                f"📡 Đang thử kết nối: {api} (Proxy:"
+                f" '{proxy or 'Kênh trực tiếp'}')"
+            )
+            raw_data = fetch_data_from_api(api, proxy)
+            matches = extract_matches(raw_data)
+
+            if matches:
+                print(f"✅ Lấy thành công {len(matches)} trận từ {api}")
+                all_matches = matches
+                break
+
+        if all_matches:
+            break
+
+    if not all_matches:
+        print("❌ Không thể lấy dữ liệu từ tất cả API dự phòng.")
+
     entries = []
-
-    for m in matches:
+    for m in all_matches:
         home = (
             m.get("home", {}).get("name")
             or m.get("home_name")
@@ -148,10 +189,6 @@ def build_m3u(matches):
             or m.get("logo")
             or ""
         )
-        if not logo and m.get("home", {}).get("id"):
-            sport_path = str(m.get("sport_type") or "football").lower()
-            team_id = m.get("home", {}).get("id")
-            logo = f"https://imgts.sportpulseapiz.com/{sport_path}/team/{team_id}/image/small"
 
         sport_type = str(
             m.get("sport_type") or m.get("type") or "football"
@@ -175,41 +212,9 @@ def build_m3u(matches):
         else:
             time_str = m.get("time_str") or m.get("time") or "00:00"
 
-        # Tách lấy link stream & BLV
-        servers = (
-            m.get("play_urls") or m.get("servers") or m.get("stream_links") or []
-        )
-        links = []
+        stream_links = get_stream_urls(m)
 
-        for s in servers:
-            if isinstance(s, dict):
-                url = (
-                    s.get("url")
-                    or s.get("play_url")
-                    or s.get("stream_url")
-                    or s.get("link")
-                )
-                blv = (
-                    s.get("name")
-                    or s.get("commentator")
-                    or s.get("blv")
-                    or "LIVE"
-                )
-            elif isinstance(s, str):
-                url = s
-                blv = "LIVE"
-            else:
-                continue
-
-            if url:
-                links.append((blv, url))
-
-        if not links:
-            single_url = m.get("play_url") or m.get("stream_url")
-            if single_url:
-                links.append(("LIVE", single_url))
-
-        for blv_name, stream_url in links:
+        for blv_name, stream_url in stream_links:
             inf_line = f'#EXTINF:-1 tvg-logo="{logo}" group-title="Xôi Lạc Z TV" , {live_prefix}{time_str} {sport_icon} {home} vs {away} ({blv_name})'
             ua_line = f"#EXTVLCOPT:http-user-agent={USER_AGENT}"
             ref_line = f"#EXTVLCOPT:http-referrer={REFERER}"
@@ -218,20 +223,15 @@ def build_m3u(matches):
                 f"{inf_line}\n{ua_line}\n{ref_line}\n{stream_url}\n"
             )
 
-    return entries
-
-
-def main():
-    matches = fetch_matches_with_playwright()
-
     with open("xoilac.m3u", "w", encoding="utf-8") as f:
         f.write("#EXTM3U\n\n")
-        if matches:
-            entries = build_m3u(matches)
+        if entries:
             f.write("\n".join(entries))
-            print(f"🎉 Đã xuất thành công {len(entries)} kênh vào xoilac.m3u")
+            print(
+                f"🎉 Đã xuất thành công {len(entries)} kênh vào file xoilac.m3u!"
+            )
         else:
-            print("⚠️ Không lấy được trận đấu nào!")
+            print("⚠️ Cập nhật file xoilac.m3u rỗng!")
 
 
 if __name__ == "__main__":
