@@ -16,34 +16,38 @@ HEADERS = {
 
 def fetch_matches():
   try:
-    response = requests.get(API_URL, headers=HEADERS, timeout=10)
+    print(f"Đang kết nối tới API: {API_URL}")
+    response = requests.get(API_URL, headers=HEADERS, timeout=15)
+    print(f"Mã phản hồi từ API: {response.status_code}")
     if response.status_code == 200:
       data = response.json()
-      # Đảm bảo lấy đúng mảng results từ cấu trúc API
       return data.get("results", [])
   except Exception as e:
-    print(f"Lỗi kết nối API: {e}")
+    print(f"Lỗi ngoại lệ khi gọi API: {e}")
   return []
 
 
 def generate_m3u():
   matches = fetch_matches()
 
-  # Khởi tạo nội dung file M3U chuẩn cho IPTV Player
+  # Khởi tạo nội dung file M3U chuẩn
   m3u_content = '#EXTM3U x-tvg-url=""\n'
 
   if not matches:
-    print("Cảnh báo: Không có trận đấu nào được trả về từ API.")
-    # Vẫn tạo file m3u rỗng để Git không bị lỗi thiếu file
+    print("Cảnh báo: Không lấy được trận đấu nào, tạo file m3u trống an toàn.")
     with open("playlist.m3u", "w", encoding="utf-8") as f:
       f.write(m3u_content)
     return
 
+  count = 0
   for match in matches:
     match_id = match.get("id")
     status_id = match.get("status_id", 0)
 
-    # Phân loại trạng thái trận đấu
+    if not match_id:
+      continue
+
+    # Phân loại trạng thái
     status_text = {
         2: "Đang diễn ra (Live)",
         3: "Nghỉ giữa trận (HT)",
@@ -55,18 +59,19 @@ def generate_m3u():
     title = f"Trận đấu [{match_id}] - {status_text}"
     stream_url = f"https://xoilacz.vip/live/{match_id}"
 
-    # Ghi thông tin từng kênh/trận đấu theo chuẩn M3U
+    # Ghi cấu trúc M3U
     m3u_content += f'#EXTINF:-1 tvg-id="{match_id}" '
     m3u_content += f'tvg-name="{title}" '
     m3u_content += 'group-title="Bóng Đá - Xôi Lạc", '
     m3u_content += f"{title}\n"
     m3u_content += f"{stream_url}\n"
+    count += 1
 
-  # Ghi đè file playlist.m3u
+  # Ghi ra file playlist.m3u
   with open("playlist.m3u", "w", encoding="utf-8") as f:
     f.write(m3u_content)
 
-  print(f"Đã tạo thành công playlist với {len(matches)} trận đấu!")
+  print(f"Thành công! Đã ghi {count} trận vào file playlist.m3u.")
 
 
 if __name__ == "__main__":
