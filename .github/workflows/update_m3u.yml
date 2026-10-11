@@ -9,7 +9,7 @@ jobs:
   update-playlist:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # Cấp quyền ghi cho GitHub Actions
 
     steps:
       - name: Checkout repository
@@ -32,6 +32,13 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add playlist.m3u
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update M3U playlist [skip ci]" && git push)
-
+          
+          # Kiểm tra xem file playlist.m3u có tồn tại không trước khi add
+          if [ -f "playlist.m3u" ]; then
+            git add playlist.m3u
+            git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update M3U playlist [skip ci]" && git push)
+          else
+            echo "File playlist.m3u không được tạo thành công bởi script!"
+            exit 1
+          fi
+          
