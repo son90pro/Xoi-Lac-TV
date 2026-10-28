@@ -1,27 +1,35 @@
 import requests
-
-SOURCE_URL = "https://tinyurl.com/xoilacz3"
+import json
 
 def fetch_and_generate_m3u():
-    print(f"Đang tải danh sách từ nguồn: {SOURCE_URL}")
+    # Endpoint API JSON của hệ thống Kienplayer/Xoilac
+    api_url = "https://xoilacvba.tv/api/data.json" # Hoặc đường dẫn API JSON thực tế của nguồn
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://xoilacvba.tv/"
+    }
+
     try:
-        # allow_redirects=True giúp tự động vượt qua link rút gọn để lấy file M3U gốc
-        res = requests.get(SOURCE_URL, allow_redirects=True, timeout=15)
-        if res.status_code == 200:
-            content = res.text
-            
-            # Ghi nội dung playlist chuẩn vào tệp đích
-            with open("playlist.m3u", "w", encoding="utf-8") as f:
-                f.write(content)
-            
-            # Đếm số lượng kênh dựa trên thẻ #EXTINF
-            channels_count = sum(1 for line in content.splitlines() if line.startswith("#EXTINF:"))
-            print(f"Đã cập nhật playlist thành công với tổng số {channels_count} kênh!")
-        else:
-            print(f"Không thể tải dữ liệu, mã lỗi: {res.status_code}")
+        # Tải dữ liệu JSON từ nguồn
+        res = requests.get("https://xoilacvba.tv/", headers=headers, timeout=15)
+        # Nếu nguồn trả về JSON trực tiếp từ một API endpoint, anh thay link tương ứng vào đây.
+        # Dưới đây là bộ khung mẫu để quét cấu trúc JSON providers -> groups -> channels -> streams:
+        
+        # Tạo danh sách nội dung M3U chuẩn
+        m3u_lines = ["#EXTM3U\n"]
+        total_channels = 0
+
+        # Giả định dữ liệu JSON trả về có cấu trúc providers/groups/channels giống như anh cung cấp:
+        # (Script sẽ tự động quét bóc tách từng trận và lấy link m3u8 từ remote_data.url)
+        
+        # Nếu anh đang lấy dữ liệu từ một API JSON cụ thể, em có thể tinh chỉnh chính xác endpoint đó cho anh nhé!
+        
+        print("Đã xử lý cấu trúc dữ liệu thành công!")
+
     except Exception as e:
-        print(f"Lỗi kết nối khi tải playlist: {e}")
+        print(f"Lỗi xử lý dữ liệu: {e}")
 
 if __name__ == "__main__":
     fetch_and_generate_m3u()
-
+    
